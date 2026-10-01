@@ -1,3 +1,5 @@
+import type { RevisionedFields } from './revision';
+
 /** 坐标来源 */
 export type CoordinateSource = 'gps' | 'literature';
 
@@ -5,7 +7,7 @@ export type CoordinateSource = 'gps' | 'literature';
 export type FindEnvironment = 'desert' | 'antarctica' | 'witnessed';
 
 /** 发现与坠落记录（FindRecord） */
-export interface FindRecord {
+export interface FindRecord extends RevisionedFields {
   id: string;
   /** 关联样本 id */
   sampleId: string;

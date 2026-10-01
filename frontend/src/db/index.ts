@@ -3,6 +3,7 @@ import type { MeteoriteSample } from '../types/sample';
 import type { FindRecord } from '../types/find';
 import type { ThinSection } from '../types/section';
 import type { AnalysisRecord } from '../types/analysis';
+import type { RevisionedFields } from '../types/revision';
 
 /** 库名固定为 gbmeteorite-db */
 export const DB_NAME = 'gbmeteorite-db';
@@ -12,6 +13,8 @@ export const DB_NAME = 'gbmeteorite-db';
  *  - v1：建 samples / finds / sections 三张表
  *  - v2：新增 analysis 表，并为 analysis 加 sampleId 索引
  *  - v3：为 samples 补 updatedAt 字段，并按 id 回填旧记录
+ *  - v4：四类记录统一补 revision / updatedAt（乐观修订号）；
+ *        analysis 补 confirmed / confirmedAt，加 confirmed 索引
  */
 export class MeteoriteDB extends Dexie {
   samples!: Table<MeteoriteSample, string>;
@@ -65,6 +68,49 @@ export class MeteoriteDB extends Dexie {
             }
           });
       });
+
+    this.version(4)
+      .stores({
+        samples:
+          'id, sampleNo, category, chemicalGroup, totalWeight, createdAt, updatedAt, revision',
+        finds: 'id, sampleId, region, createdAt, updatedAt, revision',
+        sections: 'id, sectionNo, sampleId, thickness, createdAt, updatedAt, revision',
+        analysis:
+          'id, sampleId, sectionId, method, testedAt, createdAt, updatedAt, revision, confirmed',
+      })
+      .upgrade(async (tx) => {
+        // v4：旧数据统一补齐修订号（初始为 1）与 updatedAt
+        const now = Date.now();
+        const backfillRevision = (rec: RevisionedFields & { createdAt?: number }) => {
+          if (typeof rec.revision !== 'number' || rec.revision < 1) rec.revision = 1;
+          if (typeof rec.updatedAt !== 'number') {
+            rec.updatedAt = typeof rec.createdAt === 'number' ? rec.createdAt : now;
+          }
+        };
+        await tx
+          .table<MeteoriteSample, string>('samples')
+          .toCollection()
+          .modify((sample) => backfillRevision(sample));
+        await tx
+          .table<FindRecord, string>('finds')
+          .toCollection()
+          .modify((rec) => backfillRevision(rec));
+        await tx
+          .table<ThinSection, string>('sections')
+          .toCollection()
+          .modify((rec) => backfillRevision(rec));
+        await tx
+          .table<AnalysisRecord, string>('analysis')
+          .toCollection()
+          .modify((rec) => {
+            backfillRevision(rec);
+            // 升级前的检测记录默认仍有效
+            if (typeof rec.confirmed !== 'boolean') {
+              rec.confirmed = true;
+              rec.confirmedAt = typeof rec.createdAt === 'number' ? rec.createdAt : now;
+            }
+          });
+      });
   }
 }
 
@@ -95,6 +141,7 @@ export async function seedIfEmpty(): Promise<void> {
         note: '撒哈拉回收，熔壳完整',
         createdAt: now - 86400000 * 40,
         updatedAt: now - 86400000 * 40,
+        revision: 1,
       },
       {
         id: 'sample_seed_2',
@@ -108,6 +155,7 @@ export async function seedIfEmpty(): Promise<void> {
         note: '八面体结构清晰',
         createdAt: now - 86400000 * 30,
         updatedAt: now - 86400000 * 30,
+        revision: 1,
       },
       {
         id: 'sample_seed_3',
@@ -121,6 +169,7 @@ export async function seedIfEmpty(): Promise<void> {
         note: '目击坠落，无熔壳',
         createdAt: now - 86400000 * 18,
         updatedAt: now - 86400000 * 18,
+        revision: 1,
       },
     ]);
     await db.finds.bulkAdd([
@@ -135,6 +184,8 @@ export async function seedIfEmpty(): Promise<void> {
         environment: 'desert',
         finder: '野外队 A 组',
         createdAt: now - 86400000 * 40,
+        updatedAt: now - 86400000 * 40,
+        revision: 1,
       },
       {
         id: 'find_seed_2',
@@ -147,6 +198,8 @@ export async function seedIfEmpty(): Promise<void> {
         environment: 'desert',
         finder: '标本室交换',
         createdAt: now - 86400000 * 30,
+        updatedAt: now - 86400000 * 30,
+        revision: 1,
       },
     ]);
     await db.sections.bulkAdd([
@@ -160,6 +213,8 @@ export async function seedIfEmpty(): Promise<void> {
         micrographs: ['met001_ppl.jpg', 'met001_xpl.jpg'],
         quality: 'good',
         createdAt: now - 86400000 * 35,
+        updatedAt: now - 86400000 * 35,
+        revision: 1,
       },
       {
         id: 'section_seed_2',
@@ -171,6 +226,8 @@ export async function seedIfEmpty(): Promise<void> {
         micrographs: ['met002_reflect.jpg'],
         quality: 'fair',
         createdAt: now - 86400000 * 25,
+        updatedAt: now - 86400000 * 25,
+        revision: 1,
       },
     ]);
     await db.analysis.bulkAdd([
@@ -184,7 +241,11 @@ export async function seedIfEmpty(): Promise<void> {
         ni: 0.8,
         kamaciteBandwidth: 0.02,
         testedAt: '2024-06-12',
+        confirmed: true,
+        confirmedAt: now - 86400000 * 20,
         createdAt: now - 86400000 * 20,
+        updatedAt: now - 86400000 * 20,
+        revision: 1,
       },
       {
         id: 'analysis_seed_2',
@@ -196,7 +257,11 @@ export async function seedIfEmpty(): Promise<void> {
         ni: 7.4,
         kamaciteBandwidth: 0.62,
         testedAt: '2024-07-03',
+        confirmed: true,
+        confirmedAt: now - 86400000 * 12,
         createdAt: now - 86400000 * 12,
+        updatedAt: now - 86400000 * 12,
+        revision: 1,
       },
     ]);
   });

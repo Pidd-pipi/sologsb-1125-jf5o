@@ -19,12 +19,16 @@ import {
   Typography,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
+import EditIcon from '@mui/icons-material/Edit';
 import EmptyState from '../components/common/EmptyState';
 import ClassificationBadge from '../components/common/Badge';
 import FieldGroup from '../components/common/FieldGroup';
+import ReconfirmButton from '../components/common/ReconfirmButton';
+import AnalysisEditDialog from '../components/edit/AnalysisEditDialog';
 import { useLocalDraft } from '../hooks/useLocalDraft';
 import { useSampleStore } from '../stores/sampleStore';
 import { useToastStore } from '../stores/uiStore';
+import type { AnalysisRecord } from '../types/analysis';
 import {
   ANALYSIS_METHODS,
   ANALYSIS_METHOD_LABELS,
@@ -73,6 +77,12 @@ export default function Analysis() {
 
   const { value, patch, reset, clear, restored } = useLocalDraft<AnalysisDraft>('analysis-entry', initial);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<AnalysisRecord | null>(null);
+
+  const invalidCount = useMemo(
+    () => analysis.filter((a) => !a.confirmed).length,
+    [analysis],
+  );
 
   const sampleSections = useMemo(
     () => sections.filter((s) => s.sampleId === value.sampleId),
@@ -93,19 +103,26 @@ export default function Analysis() {
       return;
     }
     setError(null);
-    await addAnalysis({
-      sampleId: value.sampleId,
-      sectionId: value.target === 'section' ? value.sectionId : undefined,
-      target: value.target,
-      method: value.method,
-      fa: Number(value.fa),
-      fs: Number(value.fs),
-      ni: Number(value.ni),
-      kamaciteBandwidth: Number(value.kamaciteBandwidth),
-      testedAt: value.testedAt,
-    });
+    try {
+      await addAnalysis({
+        sampleId: value.sampleId,
+        sectionId: value.target === 'section' ? value.sectionId : undefined,
+        target: value.target,
+        method: value.method,
+        fa: Number(value.fa),
+        fs: Number(value.fs),
+        ni: Number(value.ni),
+        kamaciteBandwidth: Number(value.kamaciteBandwidth),
+        testedAt: value.testedAt,
+        confirmed: true,
+        confirmedAt: Date.now(),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? `写入失败：${err.message}，草稿仍保留可重试` : '写入失败，草稿仍保留');
+      return;
+    }
     clear();
-    notify('检测记录已写入本地库');
+    notify('检测记录已写入本地库（修订号 r1）');
     patch({ fa: 18.5, fs: 16, ni: 0.8, kamaciteBandwidth: 0.05 });
   };
 
@@ -120,6 +137,11 @@ export default function Analysis() {
 
       {restored ? (
         <Alert severity="info">已从本地草稿恢复上次未提交的检测录入（localStorage 草稿键 analysis-entry）。</Alert>
+      ) : null}
+      {invalidCount > 0 ? (
+        <Alert severity="warning">
+          有 {invalidCount} 条检测记录因切片换绑已失效，需逐条「重新确认」后才会恢复为有效结论。
+        </Alert>
       ) : null}
       {error ? <Alert severity="error">{error}</Alert> : null}
 
@@ -353,25 +375,48 @@ export default function Analysis() {
               return (
                 <Box
                   key={a.id}
-                  sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5 }}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: a.confirmed ? 'divider' : 'warning.main',
+                    borderWidth: a.confirmed ? 1 : 2,
+                    borderRadius: 2,
+                    p: 1.5,
+                    bgcolor: a.confirmed ? 'transparent' : 'rgba(237,108,2,0.05)',
+                  }}
                 >
                   <Stack direction="row" justifyContent="space-between" flexWrap="wrap" gap={1}>
                     <Typography variant="subtitle2">
                       {s ? s.sampleNo : '未知样本'} · {ANALYSIS_METHOD_LABELS[a.method]} ·{' '}
                       {formatDate(a.testedAt)}
                     </Typography>
-                    <ClassificationBadge category={ev.category} showGroup={false} />
+                    <Stack direction="row" spacing={0.75} alignItems="center">
+                      <ClassificationBadge category={ev.category} showGroup={false} />
+                      <Chip size="small" variant="outlined" label={`r${a.revision}`} />
+                      {!a.confirmed ? (
+                        <Chip size="small" color="warning" label="失效待确认" />
+                      ) : (
+                        <Chip size="small" color="success" label="已确认" />
+                      )}
+                    </Stack>
                   </Stack>
                   <Typography variant="caption" color="text.secondary">
                     Fa {a.fa} mol% · Fs {a.fs} mol% · Ni {a.ni} wt% · 带宽 {a.kamaciteBandwidth} mm ——{' '}
                     {ev.summary}
                   </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                    <Button size="small" startIcon={<EditIcon />} onClick={() => setEditing(a)}>
+                      编辑
+                    </Button>
+                    <ReconfirmButton analysis={a} />
+                  </Stack>
                 </Box>
               );
             })}
           </Stack>
         )}
       </Paper>
+
+      {editing ? <AnalysisEditDialog open analysis={editing} onClose={() => setEditing(null)} /> : null}
     </Stack>
   );
 }

@@ -49,10 +49,10 @@ docker compose down
 
 ## 数据模型（`src/types/` 独立文件）
 
-- `types/sample.ts` — **MeteoriteSample**：id、样本编号、总重量 g、分类、化学群、风化等级 W0–W4、发现/坠落、存放位置
-- `types/find.ts` — **FindRecord**：id、关联样本、地名、国家地区、经纬度、坐标来源（GPS/文献）、发现环境、发现者
-- `types/section.ts` — **ThinSection**：id、切片编号、关联样本、厚度 μm、制样方式、矿物占比、显微照片清单
-- `types/analysis.ts` — **AnalysisRecord**：id、关联样本或切片、方法、橄榄石 Fa、辉石 Fs、Ni wt%、铁纹石带宽 mm、检测日期
+- `types/sample.ts` — **MeteoriteSample**：id、样本编号、总重量 g、分类、化学群、风化等级 W0–W4、发现/坠落、存放位置、`revision` 修订号
+- `types/find.ts` — **FindRecord**：id、关联样本、地名、国家地区、经纬度、坐标来源（GPS/文献）、发现环境、发现者、`revision` 修订号
+- `types/section.ts` — **ThinSection**：id、切片编号、关联样本、厚度 μm、制样方式、矿物占比、显微照片清单、`revision` 修订号
+- `types/analysis.ts` — **AnalysisRecord**：id、关联样本或切片、方法、橄榄石 Fa、辉石 Fs、Ni wt%、铁纹石带宽 mm、检测日期、`revision` 修订号、`confirmed` 有效性（换绑失效/重新确认）
 
 ## 目录结构
 
@@ -70,14 +70,20 @@ sologsb-1125/
     ├── vite.config.ts
     ├── public/favicon.svg
     └── src/
-        ├── types/{sample,find,section,analysis}.ts
-        ├── db/index.ts                 # Dexie 封装与 v1→v3 升级迁移
-        ├── stores/{sampleStore,uiStore}.ts
-        ├── components/common/{SampleCard,Badge,FieldGroup,EmptyState,CoordinatePicker,AppShell}.tsx
+        ├── types/{sample,find,section,analysis,revision}.ts
+        ├── db/index.ts                 # Dexie 封装与 v1→v4 升级迁移
+        ├── db/revision.ts              # 修订号乐观锁守卫、双方改动 diff
+        ├── db/sync.ts                  # 多标签页 BroadcastChannel 变更通知
+        ├── services/persist.ts         # 统一保存入口：冲突暂存、合并重试
+        ├── stores/{sampleStore,uiStore,conflictStore,pendingWrites}.ts
+        ├── components/common/{SampleCard,Badge,FieldGroup,EmptyState,CoordinatePicker,AppShell,ReconfirmButton,QuickRebindControl}.tsx
+        ├── components/edit/{SampleEditDialog,FindEditDialog,SectionEditDialog,AnalysisEditDialog}.tsx
+        ├── components/conflict/ConflictDialog.tsx   # 双方改动对比与逐字段合并
+        ├── components/pending/PendingWritesBar.tsx  # 写入失败待恢复条
         ├── hooks/{useSampleFilter,useLocalDraft,useRegionStats}.ts
         ├── pages/{Overview,New,Detail,Sections,Analysis,Locations}.tsx
         ├── router/index.tsx
-        └── utils/{classify,format,geo}.ts
+        └── utils/{classify,format,geo,fields}.ts
 ```
 
 ## 数据存储说明
@@ -87,6 +93,10 @@ sologsb-1125/
   - v1 建 `samples` / `finds` / `sections`
   - v2 新增 `analysis` 表并加 `sampleId` 索引
   - v3 为 `samples` 补 `updatedAt` 字段并按 id 回填旧记录
+  - v4 为四类记录统一补 `revision` / `updatedAt`（乐观修订号），`analysis` 补 `confirmed` / `confirmedAt` 并加 `confirmed` 索引
+- **多标签页并发保护（乐观修订号）**：样本、发现地、切片、检测四类记录均带 `revision`（新建 r1，每次写入 +1）。保存时必须携带打开编辑时的修订号，库内值已更新则**拒绝写入**，弹出「双方改动」对比：仅一方修改的字段自动并入，双方都改的字段逐字段选择采用谁，确认合并后按最新修订号重新入库。一个标签页写入后会经 BroadcastChannel 通知其他标签页自动重拉
+- **切片换绑**：切片改挂到其他样本时，事务内将其关联检测记录一并改挂并标记为失效（`confirmed=false`、修订号 +1），必须人工「重新确认」后才能继续作为结论引用；换绑期间被其他标签页改过的检测记录不覆盖、跳过并提示
+- **写入失败可恢复**：版本冲突或写入异常时，保存意图（基线记录 + 补丁）落入 localStorage 待恢复队列，页面顶部提示条可「按最新版本重试」（再冲突继续弹合并框）或「丢弃」
 - **草稿**：`/samples/new` 与 `/analysis` 的表单草稿写入 localStorage（键前缀 `gbmeteorite:draft:`），切页自动恢复，提交后清理
 - 首次打开会灌入 3 份演示样本、2 条发现记录、2 张切片与 2 条检测记录，便于直接体验筛选与打点
 

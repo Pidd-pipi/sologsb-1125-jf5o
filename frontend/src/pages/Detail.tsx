@@ -17,13 +17,24 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import EditIcon from '@mui/icons-material/Edit';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import SampleCard from '../components/common/SampleCard';
 import FieldGroup from '../components/common/FieldGroup';
 import ClassificationBadge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
+import ReconfirmButton from '../components/common/ReconfirmButton';
+import SampleEditDialog from '../components/edit/SampleEditDialog';
+import FindEditDialog from '../components/edit/FindEditDialog';
+import SectionEditDialog from '../components/edit/SectionEditDialog';
+import AnalysisEditDialog from '../components/edit/AnalysisEditDialog';
+import { attemptSave } from '../services/persist';
 import { useSampleStore } from '../stores/sampleStore';
 import { useToastStore } from '../stores/uiStore';
+import type { AnalysisRecord } from '../types/analysis';
+import type { FindRecord } from '../types/find';
+import type { MeteoriteSample } from '../types/sample';
+import type { ThinSection } from '../types/section';
 import {
   ANALYSIS_METHODS,
   ANALYSIS_METHOD_LABELS,
@@ -61,13 +72,18 @@ export default function Detail() {
   const analysis = useSampleStore((s) => s.analysis);
   const addSection = useSampleStore((s) => s.addSection);
   const addAnalysis = useSampleStore((s) => s.addAnalysis);
-  const updateSample = useSampleStore((s) => s.updateSample);
   const notify = useToastStore((s) => s.notify);
 
   const sample = useMemo(() => samples.find((s) => s.id === id), [samples, id]);
   const find = useMemo(() => finds.find((f) => f.sampleId === id), [finds, id]);
   const mySections = useMemo(() => sections.filter((s) => s.sampleId === id), [sections, id]);
   const myAnalysis = useMemo(() => analysis.filter((a) => a.sampleId === id), [analysis, id]);
+
+  // 编辑对话框目标
+  const [editingSample, setEditingSample] = useState<MeteoriteSample | null>(null);
+  const [editingFind, setEditingFind] = useState<FindRecord | null>(null);
+  const [editingSection, setEditingSection] = useState<ThinSection | null>(null);
+  const [editingAnalysis, setEditingAnalysis] = useState<AnalysisRecord | null>(null);
 
   const [sectionDraft, setSectionDraft] = useState({
     sectionNo: '',
@@ -105,30 +121,42 @@ export default function Detail() {
 
   const submitSection = async () => {
     const no = sectionDraft.sectionNo.trim() || `TS-${new Date().getFullYear()}-${mySections.length + 1}`.padEnd(3, '0');
-    await addSection({
-      sectionNo: no,
-      sampleId: sample.id,
-      thickness: Number(sectionDraft.thickness),
-      preparation: sectionDraft.preparation,
-      minerals: sectionDraft.minerals,
-      micrographs: sectionDraft.micrograph.trim() ? [sectionDraft.micrograph.trim()] : [],
-      quality: sectionDraft.quality,
-    });
+    try {
+      await addSection({
+        sectionNo: no,
+        sampleId: sample.id,
+        thickness: Number(sectionDraft.thickness),
+        preparation: sectionDraft.preparation,
+        minerals: sectionDraft.minerals,
+        micrographs: sectionDraft.micrograph.trim() ? [sectionDraft.micrograph.trim()] : [],
+        quality: sectionDraft.quality,
+      });
+    } catch (err) {
+      notify(err instanceof Error ? `切片写入失败：${err.message}` : '切片写入失败', 'warning');
+      return;
+    }
     notify(`已为 ${sample.sampleNo} 新增切片 ${no}`);
     setSectionDraft((d) => ({ ...d, sectionNo: '', micrograph: '' }));
   };
 
   const submitAnalysis = async () => {
-    await addAnalysis({
-      sampleId: sample.id,
-      target: 'sample',
-      method: analysisDraft.method,
-      fa: Number(analysisDraft.fa),
-      fs: Number(analysisDraft.fs),
-      ni: Number(analysisDraft.ni),
-      kamaciteBandwidth: Number(analysisDraft.kamaciteBandwidth),
-      testedAt: analysisDraft.testedAt,
-    });
+    try {
+      await addAnalysis({
+        sampleId: sample.id,
+        target: 'sample',
+        method: analysisDraft.method,
+        fa: Number(analysisDraft.fa),
+        fs: Number(analysisDraft.fs),
+        ni: Number(analysisDraft.ni),
+        kamaciteBandwidth: Number(analysisDraft.kamaciteBandwidth),
+        testedAt: analysisDraft.testedAt,
+        confirmed: true,
+        confirmedAt: Date.now(),
+      });
+    } catch (err) {
+      notify(err instanceof Error ? `检测写入失败：${err.message}` : '检测写入失败', 'warning');
+      return;
+    }
     notify(`已为 ${sample.sampleNo} 写入一条检测记录`);
   };
 
@@ -156,16 +184,38 @@ export default function Detail() {
             <Stack spacing={1.5}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography variant="h6">基本信息</Typography>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => {
-                    void updateSample(sample.id, { storage: sample.storage === 'loan-out' ? 'cabinet-a' : 'loan-out' });
-                    notify('已切换存放状态');
-                  }}
-                >
-                  切换存放状态
-                </Button>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<EditIcon />}
+                    onClick={() => setEditingSample(sample)}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={async () => {
+                      const nextStorage = sample.storage === 'loan-out' ? 'cabinet-a' : 'loan-out';
+                      try {
+                        const result = await attemptSave({
+                          entity: 'sample',
+                          kind: 'update',
+                          recordId: sample.id,
+                          recordLabel: sample.sampleNo,
+                          base: sample,
+                          patch: { storage: nextStorage },
+                        });
+                        if (result.ok) notify('已切换存放状态');
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : '切换失败，已加入待恢复写入', 'warning');
+                      }
+                    }}
+                  >
+                    切换存放状态
+                  </Button>
+                </Stack>
               </Stack>
               <ClassificationBadge
                 category={sample.category}
@@ -211,6 +261,14 @@ export default function Detail() {
                     {formatDate(sample.createdAt)} / {formatDate(sample.updatedAt)}
                   </Typography>
                 </Grid>
+                <Grid item xs={6} sm={4}>
+                  <Typography variant="caption" color="text.secondary">
+                    修订号
+                  </Typography>
+                  <Typography variant="body1">
+                    <Chip size="small" variant="outlined" label={`r${sample.revision}`} />
+                  </Typography>
+                </Grid>
               </Grid>
               {sample.note ? (
                 <Typography variant="body2" color="text.secondary">
@@ -218,7 +276,19 @@ export default function Detail() {
                 </Typography>
               ) : null}
               <Divider />
-              <Typography variant="h6">发现地摘要</Typography>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="h6">发现地摘要</Typography>
+                {find ? (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<EditIcon />}
+                    onClick={() => setEditingFind(find)}
+                  >
+                    编辑发现地
+                  </Button>
+                ) : null}
+              </Stack>
               {find ? (
                 <Grid container spacing={1.5}>
                   <Grid item xs={6} sm={4}>
@@ -263,6 +333,9 @@ export default function Detail() {
                     </Typography>
                     <Typography variant="body2">{find.finder}</Typography>
                   </Grid>
+                  <Grid item xs={12}>
+                    <Chip size="small" variant="outlined" label={`发现地修订号 r${find.revision}`} />
+                  </Grid>
                 </Grid>
               ) : (
                 <Alert severity="warning">
@@ -293,10 +366,18 @@ export default function Detail() {
                       <Typography variant="subtitle1" fontWeight={700}>
                         {s.sectionNo}
                       </Typography>
-                      <Stack direction="row" spacing={0.75}>
+                      <Stack direction="row" spacing={0.75} alignItems="center">
                         <Chip size="small" label={`厚度 ${s.thickness} μm`} />
                         <Chip size="small" variant="outlined" label={PREPARATION_LABELS[s.preparation]} />
                         <Chip size="small" color="secondary" label={SECTION_QUALITY_LABELS[s.quality]} />
+                        <Chip size="small" variant="outlined" label={`r${s.revision}`} />
+                        <Button
+                          size="small"
+                          startIcon={<EditIcon />}
+                          onClick={() => setEditingSection(s)}
+                        >
+                          编辑 / 换绑
+                        </Button>
                       </Stack>
                     </Stack>
                     <Typography variant="body2" color="text.secondary">
@@ -425,13 +506,27 @@ export default function Detail() {
                   return (
                     <Box
                       key={a.id}
-                      sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5 }}
+                      sx={{
+                        border: '1px solid',
+                        borderColor: a.confirmed ? 'divider' : 'warning.main',
+                        borderWidth: a.confirmed ? 1 : 2,
+                        borderRadius: 2,
+                        p: 1.5,
+                        bgcolor: a.confirmed ? 'transparent' : 'rgba(237,108,2,0.05)',
+                      }}
                     >
                       <Stack direction="row" justifyContent="space-between" flexWrap="wrap" gap={1}>
                         <Typography variant="subtitle2">
                           {ANALYSIS_METHOD_LABELS[a.method]} · {a.testedAt}
+                          {a.target === 'section' ? ` · 切片检测` : ''}
                         </Typography>
-                        <ClassificationBadge category={a2.category} showGroup={false} />
+                        <Stack direction="row" spacing={0.75} alignItems="center">
+                          <ClassificationBadge category={a2.category} showGroup={false} />
+                          <Chip size="small" variant="outlined" label={`r${a.revision}`} />
+                          {!a.confirmed ? (
+                            <Chip size="small" color="warning" label="失效待确认" />
+                          ) : null}
+                        </Stack>
                       </Stack>
                       <Typography variant="body2" color="text.secondary">
                         Fa {formatNumber(a.fa, 2, ' mol%')} · Fs {formatNumber(a.fs, 2, ' mol%')} · Ni{' '}
@@ -440,6 +535,12 @@ export default function Detail() {
                       <Typography variant="caption" color="text.secondary">
                         {a2.summary}
                       </Typography>
+                      <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                        <Button size="small" startIcon={<EditIcon />} onClick={() => setEditingAnalysis(a)}>
+                          编辑数值
+                        </Button>
+                        <ReconfirmButton analysis={a} />
+                      </Stack>
                     </Box>
                   );
                 })}
@@ -546,6 +647,27 @@ export default function Detail() {
           </Paper>
         </Grid>
       </Grid>
+
+      {editingSample ? (
+        <SampleEditDialog
+          open
+          sample={editingSample}
+          onClose={() => setEditingSample(null)}
+        />
+      ) : null}
+      {editingFind ? (
+        <FindEditDialog open find={editingFind} onClose={() => setEditingFind(null)} />
+      ) : null}
+      {editingSection ? (
+        <SectionEditDialog open section={editingSection} onClose={() => setEditingSection(null)} />
+      ) : null}
+      {editingAnalysis ? (
+        <AnalysisEditDialog
+          open
+          analysis={editingAnalysis}
+          onClose={() => setEditingAnalysis(null)}
+        />
+      ) : null}
     </Stack>
   );
 }

@@ -15,12 +15,17 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import EditIcon from '@mui/icons-material/Edit';
 import { Link as RouterLink } from 'react-router-dom';
 import EmptyState from '../components/common/EmptyState';
 import ClassificationBadge from '../components/common/Badge';
+import QuickRebindControl from '../components/common/QuickRebindControl';
+import SectionEditDialog from '../components/edit/SectionEditDialog';
 import { useSampleFilter } from '../hooks/useSampleFilter';
 import { useSampleStore } from '../stores/sampleStore';
 import { useToastStore } from '../stores/uiStore';
+import { attemptSave, labelOf } from '../services/persist';
+import type { ThinSection } from '../types/section';
 import {
   MINERAL_KEYS,
   MINERAL_LABELS,
@@ -36,7 +41,6 @@ import { formatDate } from '../utils/format';
 export default function Sections() {
   const sections = useSampleStore((s) => s.sections);
   const samples = useSampleStore((s) => s.samples);
-  const updateSection = useSampleStore((s) => s.updateSection);
   const notify = useToastStore((s) => s.notify);
   const { results } = useSampleFilter();
 
@@ -45,6 +49,7 @@ export default function Sections() {
   const [mineralKey, setMineralKey] = useState<(typeof MINERAL_KEYS)[number] | ''>('');
   const [mineralMin, setMineralMin] = useState<number | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [editingSection, setEditingSection] = useState<ThinSection | null>(null);
 
   const sampleMap = useMemo(() => new Map(samples.map((s) => [s.id, s])), [samples]);
   const visibleSampleIds = useMemo(() => new Set(results.map((s) => s.id)), [results]);
@@ -65,10 +70,37 @@ export default function Sections() {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
+  /** 批量标注逐条带修订号写入：过期的进入待恢复合并，不覆盖他人改动 */
   const bulkLabel = async (quality: SectionQuality) => {
     if (!selected.length) return;
-    await Promise.all(selected.map((id) => updateSection(id, { quality })));
-    notify(`已批量标注 ${selected.length} 张切片为「${SECTION_QUALITY_LABELS[quality]}」`);
+    const targets = sections.filter((s) => selected.includes(s.id));
+    let saved = 0;
+    let blocked = 0;
+    let failed = 0;
+    for (const section of targets) {
+      try {
+        const result = await attemptSave({
+          entity: 'section',
+          kind: 'update',
+          recordId: section.id,
+          recordLabel: labelOf('section', section),
+          base: section,
+          patch: { quality },
+        });
+        if (result.ok) saved += 1;
+        else blocked += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    if (blocked || failed) {
+      notify(
+        `已标注 ${saved} 张；${blocked} 张因修订号过期、${failed} 张因写入失败未入库，已加入待恢复写入`,
+        'warning',
+      );
+    } else {
+      notify(`已批量标注 ${saved} 张切片为「${SECTION_QUALITY_LABELS[quality]}」`);
+    }
     setSelected([]);
   };
 
@@ -201,6 +233,17 @@ export default function Sections() {
                     <Typography variant="caption" color="text.secondary">
                       显微照片：{s.micrographs.length ? s.micrographs.join('、') : '未上传'}
                     </Typography>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                      <Chip size="small" variant="outlined" label={`修订号 r${s.revision}`} />
+                      <Button
+                        size="small"
+                        startIcon={<EditIcon />}
+                        onClick={() => setEditingSection(s)}
+                      >
+                        编辑
+                      </Button>
+                      <QuickRebindControl section={s} />
+                    </Stack>
                   </Stack>
                 </Paper>
               </Grid>
@@ -208,6 +251,10 @@ export default function Sections() {
           })}
         </Grid>
       )}
+
+      {editingSection ? (
+        <SectionEditDialog open section={editingSection} onClose={() => setEditingSection(null)} />
+      ) : null}
     </Stack>
   );
 }

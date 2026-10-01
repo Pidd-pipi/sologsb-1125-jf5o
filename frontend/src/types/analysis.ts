@@ -1,4 +1,5 @@
 import type { ClassificationAdvice } from './sample';
+import type { RevisionedFields } from './revision';
 
 /** 检测方法 */
 export type AnalysisMethod = 'microprobe' | 'sem-eds';
@@ -6,8 +7,11 @@ export type AnalysisMethod = 'microprobe' | 'sem-eds';
 /** 检测对象类型 */
 export type AnalysisTarget = 'sample' | 'section';
 
-/** 分析检测结果（AnalysisRecord） */
-export interface AnalysisRecord {
+/**
+ * 分析检测结果（AnalysisRecord）
+ *  - confirmed=false 表示因切片换绑而失效，需要人工「重新确认」后才可继续作为结论引用
+ */
+export interface AnalysisRecord extends RevisionedFields {
   id: string;
   /** 关联样本 id */
   sampleId: string;
@@ -25,6 +29,10 @@ export interface AnalysisRecord {
   kamaciteBandwidth: number;
   /** 检测日期 YYYY-MM-DD */
   testedAt: string;
+  /** 是否仍有效：切片换绑后关联检测记录置为 false，重新确认时置回 true */
+  confirmed: boolean;
+  /** 最近一次确认时间（失效时清空） */
+  confirmedAt?: number;
   createdAt: number;
 }
 
@@ -74,8 +82,8 @@ export interface AnalysisEvaluation {
   advice: ClassificationAdvice;
 }
 
-/** 生成一条空检测记录骨架 */
-export function emptyAnalysisDraft(sampleId: string): Omit<AnalysisRecord, 'id' | 'createdAt'> {
+/** 生成一条空检测记录骨架（新记录修订号为 1、默认已确认） */
+export function emptyAnalysisDraft(sampleId: string): Omit<AnalysisRecord, 'id' | 'createdAt' | 'updatedAt' | 'revision'> {
   return {
     sampleId,
     target: 'sample',
@@ -85,5 +93,7 @@ export function emptyAnalysisDraft(sampleId: string): Omit<AnalysisRecord, 'id' 
     ni: 0,
     kamaciteBandwidth: 0,
     testedAt: new Date().toISOString().slice(0, 10),
+    confirmed: true,
+    confirmedAt: Date.now(),
   };
 }

@@ -118,32 +118,50 @@ export default function New() {
     setErrors(list);
     if (list.length) return;
 
-    const sampleId = await addSample({
-      sampleNo: value.sampleNo.trim(),
-      totalWeight: Number(value.totalWeight),
-      category: value.category,
-      chemicalGroup: value.chemicalGroup,
-      weathering: value.weathering,
-      fallOrFind: value.fallOrFind,
-      storage: value.storage,
-      note: value.note.trim() || undefined,
-    });
+    let sampleId: string;
+    try {
+      sampleId = await addSample({
+        sampleNo: value.sampleNo.trim(),
+        totalWeight: Number(value.totalWeight),
+        category: value.category,
+        chemicalGroup: value.chemicalGroup,
+        weathering: value.weathering,
+        fallOrFind: value.fallOrFind,
+        storage: value.storage,
+        note: value.note.trim() || undefined,
+      });
+    } catch (err) {
+      setErrors([err instanceof Error ? `样本写入失败：${err.message}，草稿仍保留` : '样本写入失败，草稿仍保留']);
+      return;
+    }
 
     if (value.withFind) {
-      await addFind({
-        sampleId,
-        placeName: value.placeName.trim(),
-        region: value.region.trim(),
-        longitude: Number(value.longitude),
-        latitude: Number(value.latitude),
-        coordinateSource: value.coordinateSource,
-        environment: value.environment,
-        finder: value.finder.trim() || '未署名',
-      });
+      try {
+        await addFind({
+          sampleId,
+          placeName: value.placeName.trim(),
+          region: value.region.trim(),
+          longitude: Number(value.longitude),
+          latitude: Number(value.latitude),
+          coordinateSource: value.coordinateSource,
+          environment: value.environment,
+          finder: value.finder.trim() || '未署名',
+        });
+      } catch (err) {
+        // 样本已入库、发现地失败：提示后跳到详情页，可在详情页补录
+        notify(
+          err instanceof Error
+            ? `样本已登记，但发现地写入失败：${err.message}，请到详情页补录`
+            : '样本已登记，发现地写入失败，请到详情页补录',
+          'warning',
+        );
+        navigate(`/samples/${sampleId}`);
+        return;
+      }
     }
 
     clear();
-    notify(`已登记样本 ${value.sampleNo.trim()}`);
+    notify(`已登记样本 ${value.sampleNo.trim()}（修订号 r1）`);
     navigate(`/samples/${sampleId}`);
   };
 

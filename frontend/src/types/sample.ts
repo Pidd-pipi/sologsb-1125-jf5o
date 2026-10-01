@@ -1,3 +1,5 @@
+import type { RevisionedFields } from './revision';
+
 /** 陨石分类：球粒陨石 / 铁陨石 / 石铁陨石 / 无球粒陨石 */
 export type SampleCategory = 'chondrite' | 'iron' | 'stony-iron' | 'achondrite';
 
@@ -14,7 +16,7 @@ export type FallOrFind = 'fall' | 'find';
 export type StorageLocation = 'cabinet-a' | 'cabinet-b' | 'desiccator' | 'loan-out';
 
 /** 陨石样本（MeteoriteSample） */
-export interface MeteoriteSample {
+export interface MeteoriteSample extends RevisionedFields {
   id: string;
   /** 样本编号，形如 MET-2024-001 */
   sampleNo: string;
@@ -28,8 +30,7 @@ export interface MeteoriteSample {
   /** 备注（可选） */
   note?: string;
   createdAt: number;
-  /** v3 升级迁移新增字段 */
-  updatedAt: number;
+  // updatedAt / revision 由 RevisionedFields 提供
 }
 
 export const CATEGORY_LABELS: Record<SampleCategory, string> = {

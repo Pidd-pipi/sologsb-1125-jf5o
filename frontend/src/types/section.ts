@@ -1,3 +1,5 @@
+import type { RevisionedFields } from './revision';
+
 /** 制样方式 */
 export type PreparationMethod = 'resin' | 'epoxy';
 
@@ -17,11 +19,11 @@ export interface MineralRatios {
 }
 
 /** 切片与制样（ThinSection） */
-export interface ThinSection {
+export interface ThinSection extends RevisionedFields {
   id: string;
   /** 切片编号，形如 TS-2024-001 */
   sectionNo: string;
-  /** 关联样本 id */
+  /** 关联样本 id（换绑走 rebindSection，会使关联检测记录失效） */
   sampleId: string;
   /** 厚度，单位 μm */
   thickness: number;

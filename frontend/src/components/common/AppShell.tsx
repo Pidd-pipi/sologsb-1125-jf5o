@@ -21,6 +21,9 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import PublicIcon from '@mui/icons-material/Public';
 import { useSampleStore } from '../../stores/sampleStore';
 import { useToastStore } from '../../stores/uiStore';
+import { subscribeSync } from '../../db/sync';
+import ConflictDialog from '../conflict/ConflictDialog';
+import PendingWritesBar from '../pending/PendingWritesBar';
 
 const DRAWER_WIDTH = 232;
 
@@ -57,6 +60,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!loaded) void loadAll();
   }, [loaded, loadAll]);
+
+  // 其他标签页写入后自动重拉，尽量避免拿旧修订号编辑
+  useEffect(() => {
+    const unsubscribe = subscribeSync(() => {
+      void useSampleStore.getState().refreshFromDb();
+    });
+    return unsubscribe;
+  }, []);
 
   return (
     <ThemeProvider theme={theme}>
@@ -147,10 +158,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <Box component="main" sx={{ flex: 1, minWidth: 0 }}>
           <Toolbar />
           <Container maxWidth="xl" sx={{ py: 3 }}>
+            <PendingWritesBar />
             {children}
           </Container>
         </Box>
       </Box>
+
+      <ConflictDialog />
 
       <Snackbar
         open={toast.open}
