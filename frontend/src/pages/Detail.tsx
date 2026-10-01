@@ -4,6 +4,10 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   FormControl,
   Grid,
@@ -17,6 +21,8 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+import VerifiedIcon from '@mui/icons-material/Verified';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import SampleCard from '../components/common/SampleCard';
 import FieldGroup from '../components/common/FieldGroup';
@@ -29,6 +35,7 @@ import {
   ANALYSIS_METHOD_LABELS,
   ANALYSIS_THRESHOLDS,
   type AnalysisMethod,
+  type AnalysisRecord,
 } from '../types/analysis';
 import {
   MINERAL_KEYS,
@@ -41,6 +48,7 @@ import {
   type MineralRatios,
   type PreparationMethod,
   type SectionQuality,
+  type ThinSection,
 } from '../types/section';
 import {
   FALL_OR_FIND_LABELS,
@@ -62,6 +70,8 @@ export default function Detail() {
   const addSection = useSampleStore((s) => s.addSection);
   const addAnalysis = useSampleStore((s) => s.addAnalysis);
   const updateSample = useSampleStore((s) => s.updateSample);
+  const updateSection = useSampleStore((s) => s.updateSection);
+  const reconfirmAnalysis = useSampleStore((s) => s.reconfirmAnalysis);
   const notify = useToastStore((s) => s.notify);
 
   const sample = useMemo(() => samples.find((s) => s.id === id), [samples, id]);
@@ -85,6 +95,8 @@ export default function Detail() {
     kamaciteBandwidth: 0.05,
     testedAt: new Date().toISOString().slice(0, 10),
   });
+  const [rebindTarget, setRebindTarget] = useState<ThinSection | null>(null);
+  const [rebindSampleId, setRebindSampleId] = useState<string>('');
 
   if (!sample) {
     return (
@@ -132,6 +144,26 @@ export default function Detail() {
     notify(`已为 ${sample.sampleNo} 写入一条检测记录`);
   };
 
+  const openRebind = (section: ThinSection) => {
+    setRebindTarget(section);
+    setRebindSampleId(section.sampleId);
+  };
+
+  const confirmRebind = async () => {
+    if (!rebindTarget || !rebindSampleId || rebindSampleId === rebindTarget.sampleId) {
+      setRebindTarget(null);
+      return;
+    }
+    await updateSection(rebindTarget, { sampleId: rebindSampleId });
+    notify(`切片 ${rebindTarget.sectionNo} 已换绑，关联检测记录已标记为待重新确认`);
+    setRebindTarget(null);
+  };
+
+  const handleReconfirm = async (a: AnalysisRecord) => {
+    await reconfirmAnalysis(a);
+    notify(`检测记录 ${a.testedAt} 已确认有效`);
+  };
+
   return (
     <Stack spacing={2.5}>
       <Stack direction="row" spacing={1.5} alignItems="center">
@@ -160,7 +192,7 @@ export default function Detail() {
                   size="small"
                   variant="outlined"
                   onClick={() => {
-                    void updateSample(sample.id, { storage: sample.storage === 'loan-out' ? 'cabinet-a' : 'loan-out' });
+                    void updateSample(sample, { storage: sample.storage === 'loan-out' ? 'cabinet-a' : 'loan-out' });
                     notify('已切换存放状态');
                   }}
                 >
@@ -293,10 +325,18 @@ export default function Detail() {
                       <Typography variant="subtitle1" fontWeight={700}>
                         {s.sectionNo}
                       </Typography>
-                      <Stack direction="row" spacing={0.75}>
+                      <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
                         <Chip size="small" label={`厚度 ${s.thickness} μm`} />
                         <Chip size="small" variant="outlined" label={PREPARATION_LABELS[s.preparation]} />
                         <Chip size="small" color="secondary" label={SECTION_QUALITY_LABELS[s.quality]} />
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<SwapHorizIcon />}
+                          onClick={() => openRebind(s)}
+                        >
+                          换绑样本
+                        </Button>
                       </Stack>
                     </Stack>
                     <Typography variant="body2" color="text.secondary">
@@ -425,21 +465,45 @@ export default function Detail() {
                   return (
                     <Box
                       key={a.id}
-                      sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5 }}
+                      sx={{
+                        border: '1px solid',
+                        borderColor: a.needsReconfirm ? 'warning.main' : 'divider',
+                        bgcolor: a.needsReconfirm ? 'rgba(237,108,2,0.06)' : 'transparent',
+                        borderRadius: 2,
+                        p: 1.5,
+                      }}
                     >
                       <Stack direction="row" justifyContent="space-between" flexWrap="wrap" gap={1}>
                         <Typography variant="subtitle2">
                           {ANALYSIS_METHOD_LABELS[a.method]} · {a.testedAt}
                         </Typography>
-                        <ClassificationBadge category={a2.category} showGroup={false} />
+                        <Stack direction="row" spacing={0.75} alignItems="center">
+                          {a.needsReconfirm ? (
+                            <Chip size="small" color="warning" label="待重新确认" />
+                          ) : null}
+                          <ClassificationBadge category={a2.category} showGroup={false} />
+                        </Stack>
                       </Stack>
                       <Typography variant="body2" color="text.secondary">
                         Fa {formatNumber(a.fa, 2, ' mol%')} · Fs {formatNumber(a.fs, 2, ' mol%')} · Ni{' '}
                         {formatNumber(a.ni, 2, ' wt%')} · 带宽 {formatNumber(a.kamaciteBandwidth, 3, ' mm')}
                       </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {a2.summary}
-                      </Typography>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                        <Typography variant="caption" color="text.secondary">
+                          {a2.summary}
+                        </Typography>
+                        {a.needsReconfirm ? (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="warning"
+                            startIcon={<VerifiedIcon />}
+                            onClick={() => handleReconfirm(a)}
+                          >
+                            确认记录有效
+                          </Button>
+                        ) : null}
+                      </Stack>
                     </Box>
                   );
                 })}
@@ -546,6 +610,40 @@ export default function Detail() {
           </Paper>
         </Grid>
       </Grid>
+
+      <Dialog open={rebindTarget !== null} onClose={() => setRebindTarget(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>换绑切片样本</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+            <Alert severity="info">
+              切片 {rebindTarget?.sectionNo} 换绑到其他样本后，关联到该切片的检测记录将失效，需要重新确认。
+            </Alert>
+            <FormControl fullWidth size="small">
+              <InputLabel id="rebind-sample-label">目标样本</InputLabel>
+              <Select
+                labelId="rebind-sample-label"
+                label="目标样本"
+                value={rebindSampleId}
+                onChange={(e) => setRebindSampleId(e.target.value)}
+              >
+                {samples
+                  .filter((s) => s.id !== sample.id)
+                  .map((s) => (
+                    <MenuItem key={s.id} value={s.id}>
+                      {s.sampleNo}
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRebindTarget(null)}>取消</Button>
+          <Button variant="contained" onClick={() => void confirmRebind()}>
+            确认换绑
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

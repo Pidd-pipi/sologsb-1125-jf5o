@@ -67,7 +67,12 @@ export default function Sections() {
 
   const bulkLabel = async (quality: SectionQuality) => {
     if (!selected.length) return;
-    await Promise.all(selected.map((id) => updateSection(id, { quality })));
+    await Promise.all(
+      selected.map((id) => {
+        const section = sections.find((s) => s.id === id);
+        return section ? updateSection(section, { quality }) : Promise.resolve();
+      }),
+    );
     notify(`已批量标注 ${selected.length} 张切片为「${SECTION_QUALITY_LABELS[quality]}」`);
     setSelected([]);
   };

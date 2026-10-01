@@ -12,6 +12,7 @@ export const DB_NAME = 'gbmeteorite-db';
  *  - v1：建 samples / finds / sections 三张表
  *  - v2：新增 analysis 表，并为 analysis 加 sampleId 索引
  *  - v3：为 samples 补 updatedAt 字段，并按 id 回填旧记录
+ *  - v4：为四类记录补 revision 修订号（乐观锁），旧数据一律从 rev 1 开始
  */
 export class MeteoriteDB extends Dexie {
   samples!: Table<MeteoriteSample, string>;
@@ -65,6 +66,29 @@ export class MeteoriteDB extends Dexie {
             }
           });
       });
+
+    this.version(4)
+      .stores({
+        samples:
+          'id, sampleNo, category, chemicalGroup, totalWeight, createdAt, updatedAt, revision',
+        finds: 'id, sampleId, region, createdAt, revision',
+        sections: 'id, sectionNo, sampleId, thickness, createdAt, revision',
+        analysis: 'id, sampleId, sectionId, method, testedAt, createdAt, revision, needsReconfirm',
+      })
+      .upgrade(async (tx) => {
+        // v4：为四类记录补齐修订号，旧数据一律从 rev 1 开始（乐观锁起点）
+        const backfill = async <T extends { revision?: number }>(table: string) => {
+          await tx.table<T, string>(table).toCollection().modify((rec) => {
+            if (typeof rec.revision !== 'number' || rec.revision < 1) {
+              rec.revision = 1;
+            }
+          });
+        };
+        await backfill<MeteoriteSample>('samples');
+        await backfill<FindRecord>('finds');
+        await backfill<ThinSection>('sections');
+        await backfill<AnalysisRecord>('analysis');
+      });
   }
 }
 
@@ -95,6 +119,7 @@ export async function seedIfEmpty(): Promise<void> {
         note: '撒哈拉回收，熔壳完整',
         createdAt: now - 86400000 * 40,
         updatedAt: now - 86400000 * 40,
+        revision: 1,
       },
       {
         id: 'sample_seed_2',
@@ -108,6 +133,7 @@ export async function seedIfEmpty(): Promise<void> {
         note: '八面体结构清晰',
         createdAt: now - 86400000 * 30,
         updatedAt: now - 86400000 * 30,
+        revision: 1,
       },
       {
         id: 'sample_seed_3',
@@ -121,6 +147,7 @@ export async function seedIfEmpty(): Promise<void> {
         note: '目击坠落，无熔壳',
         createdAt: now - 86400000 * 18,
         updatedAt: now - 86400000 * 18,
+        revision: 1,
       },
     ]);
     await db.finds.bulkAdd([
@@ -135,6 +162,7 @@ export async function seedIfEmpty(): Promise<void> {
         environment: 'desert',
         finder: '野外队 A 组',
         createdAt: now - 86400000 * 40,
+        revision: 1,
       },
       {
         id: 'find_seed_2',
@@ -147,6 +175,7 @@ export async function seedIfEmpty(): Promise<void> {
         environment: 'desert',
         finder: '标本室交换',
         createdAt: now - 86400000 * 30,
+        revision: 1,
       },
     ]);
     await db.sections.bulkAdd([
@@ -160,6 +189,7 @@ export async function seedIfEmpty(): Promise<void> {
         micrographs: ['met001_ppl.jpg', 'met001_xpl.jpg'],
         quality: 'good',
         createdAt: now - 86400000 * 35,
+        revision: 1,
       },
       {
         id: 'section_seed_2',
@@ -171,6 +201,7 @@ export async function seedIfEmpty(): Promise<void> {
         micrographs: ['met002_reflect.jpg'],
         quality: 'fair',
         createdAt: now - 86400000 * 25,
+        revision: 1,
       },
     ]);
     await db.analysis.bulkAdd([
@@ -185,6 +216,7 @@ export async function seedIfEmpty(): Promise<void> {
         kamaciteBandwidth: 0.02,
         testedAt: '2024-06-12',
         createdAt: now - 86400000 * 20,
+        revision: 1,
       },
       {
         id: 'analysis_seed_2',
@@ -197,6 +229,7 @@ export async function seedIfEmpty(): Promise<void> {
         kamaciteBandwidth: 0.62,
         testedAt: '2024-07-03',
         createdAt: now - 86400000 * 12,
+        revision: 1,
       },
     ]);
   });

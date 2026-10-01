@@ -19,6 +19,7 @@ import {
   Typography,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
+import VerifiedIcon from '@mui/icons-material/Verified';
 import EmptyState from '../components/common/EmptyState';
 import ClassificationBadge from '../components/common/Badge';
 import FieldGroup from '../components/common/FieldGroup';
@@ -31,6 +32,7 @@ import {
   ANALYSIS_TARGETS,
   ANALYSIS_TARGET_LABELS,
   type AnalysisMethod,
+  type AnalysisRecord,
   type AnalysisTarget,
 } from '../types/analysis';
 import { classifyByAnalysis, evaluateThresholds } from '../utils/classify';
@@ -54,6 +56,7 @@ export default function Analysis() {
   const sections = useSampleStore((s) => s.sections);
   const analysis = useSampleStore((s) => s.analysis);
   const addAnalysis = useSampleStore((s) => s.addAnalysis);
+  const reconfirmAnalysis = useSampleStore((s) => s.reconfirmAnalysis);
   const notify = useToastStore((s) => s.notify);
 
   const initial = useMemo<AnalysisDraft>(
@@ -107,6 +110,11 @@ export default function Analysis() {
     clear();
     notify('检测记录已写入本地库');
     patch({ fa: 18.5, fs: 16, ni: 0.8, kamaciteBandwidth: 0.05 });
+  };
+
+  const handleReconfirm = async (a: AnalysisRecord) => {
+    await reconfirmAnalysis(a);
+    notify(`检测记录 ${a.testedAt} 已确认有效`);
   };
 
   return (
@@ -353,19 +361,41 @@ export default function Analysis() {
               return (
                 <Box
                   key={a.id}
-                  sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5 }}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: a.needsReconfirm ? 'warning.main' : 'divider',
+                    bgcolor: a.needsReconfirm ? 'rgba(237,108,2,0.06)' : 'transparent',
+                    borderRadius: 2,
+                    p: 1.5,
+                  }}
                 >
                   <Stack direction="row" justifyContent="space-between" flexWrap="wrap" gap={1}>
                     <Typography variant="subtitle2">
                       {s ? s.sampleNo : '未知样本'} · {ANALYSIS_METHOD_LABELS[a.method]} ·{' '}
                       {formatDate(a.testedAt)}
                     </Typography>
-                    <ClassificationBadge category={ev.category} showGroup={false} />
+                    <Stack direction="row" spacing={0.75} alignItems="center">
+                      {a.needsReconfirm ? <Chip size="small" color="warning" label="待重新确认" /> : null}
+                      <ClassificationBadge category={ev.category} showGroup={false} />
+                    </Stack>
                   </Stack>
-                  <Typography variant="caption" color="text.secondary">
-                    Fa {a.fa} mol% · Fs {a.fs} mol% · Ni {a.ni} wt% · 带宽 {a.kamaciteBandwidth} mm ——{' '}
-                    {ev.summary}
-                  </Typography>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                    <Typography variant="caption" color="text.secondary">
+                      Fa {a.fa} mol% · Fs {a.fs} mol% · Ni {a.ni} wt% · 带宽 {a.kamaciteBandwidth} mm ——{' '}
+                      {ev.summary}
+                    </Typography>
+                    {a.needsReconfirm ? (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        startIcon={<VerifiedIcon />}
+                        onClick={() => handleReconfirm(a)}
+                      >
+                        确认记录有效
+                      </Button>
+                    ) : null}
+                  </Stack>
                 </Box>
               );
             })}

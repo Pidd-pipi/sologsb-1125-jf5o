@@ -26,6 +26,13 @@ export interface AnalysisRecord {
   /** 检测日期 YYYY-MM-DD */
   testedAt: string;
   createdAt: number;
+  /** 修订号：乐观锁，每次保存 +1 */
+  revision: number;
+  /**
+   * 切片换绑样本后，关联到该切片的检测记录会被标记为 true（失效待重新确认）。
+   * 用户在界面上确认记录仍有效后清除该标记。
+   */
+  needsReconfirm?: boolean;
 }
 
 export const ANALYSIS_METHOD_LABELS: Record<AnalysisMethod, string> = {
@@ -74,8 +81,8 @@ export interface AnalysisEvaluation {
   advice: ClassificationAdvice;
 }
 
-/** 生成一条空检测记录骨架 */
-export function emptyAnalysisDraft(sampleId: string): Omit<AnalysisRecord, 'id' | 'createdAt'> {
+/** 生成一条空检测记录骨架（新记录无修订号，保存时由库内补 rev 1） */
+export function emptyAnalysisDraft(sampleId: string): Omit<AnalysisRecord, 'id' | 'createdAt' | 'revision'> {
   return {
     sampleId,
     target: 'sample',
